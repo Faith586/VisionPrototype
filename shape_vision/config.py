@@ -7,33 +7,38 @@ No other code changes are needed.
 
 # Shape configuration dictionary.
 # Each entry defines how to detect a shape by vertex count, aspect ratio, or circularity.
-# Colors are BGR tuples (OpenCV convention).
+# Colors have both BGR (for OpenCV drawing) and CSS (for the web dashboard).
 SHAPE_CONFIG = {
     "Triangle": {
         "min_vertices": 3,
         "max_vertices": 3,
-        "color": (255, 255, 0),       # Cyan
+        "color": (255, 255, 0),       # Cyan (BGR)
+        "css_color": "#00FFFF",
     },
     "Square": {
         "min_vertices": 4,
         "max_vertices": 4,
         "aspect_range": (0.85, 1.15),
-        "color": (0, 165, 255),        # Orange
+        "color": (0, 165, 255),        # Orange (BGR)
+        "css_color": "#FFA500",
     },
     "Rectangle": {
         "min_vertices": 4,
         "max_vertices": 4,
         "aspect_range": None,          # Any aspect ratio (non-square quads)
-        "color": (255, 0, 255),        # Purple
+        "color": (255, 0, 255),        # Purple (BGR)
+        "css_color": "#FF00FF",
     },
     "Circle": {
         "circularity_threshold": 0.80,
-        "color": (0, 255, 0),          # Green
+        "color": (0, 255, 0),          # Green (BGR)
+        "css_color": "#00FF00",
     },
     "Pentagon": {
         "min_vertices": 5,
         "max_vertices": 5,
-        "color": (0, 255, 255),        # Yellow
+        "color": (0, 255, 255),        # Yellow (BGR)
+        "css_color": "#FFFF00",
     },
 }
 
@@ -52,7 +57,6 @@ OCR_CONFIDENCE_THRESHOLD = 0.20  # Minimum confidence to accept an OCR result
 OCR_SKIP_FRAMES = True           # Only run OCR on new/moved shapes, not every frame
 
 # --- Dashboard ---
-SIDEBAR_WIDTH = 320              # Pixels
 MAX_LOG_ENTRIES = 20             # Number of entries in the detection log
 FONT_SCALE_LABEL = 0.6
 FONT_THICKNESS = 2
@@ -61,3 +65,7 @@ FONT_THICKNESS = 2
 DEFAULT_CAMERA_INDEX = 0
 TARGET_WIDTH = 1280
 TARGET_HEIGHT = 720
+
+# --- Web server ---
+WEB_HOST = "0.0.0.0"
+WEB_PORT = 5000
