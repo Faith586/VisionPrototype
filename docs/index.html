@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shape Vision Dashboard</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #1a1a2e;
+    color: #eee;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* --- Loading overlay --- */
+  #loading-overlay {
+    position: fixed; inset: 0;
+    background: #1a1a2e;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    z-index: 9999;
+  }
+  #loading-overlay h1 { font-size: 28px; color: #e94560; margin-bottom: 20px; }
+  #loading-overlay .status { color: #aaa; font-size: 14px; margin: 6px 0; }
+  .spinner {
+    width: 48px; height: 48px;
+    border: 4px solid #0f3460; border-top-color: #e94560;
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+    margin-bottom: 24px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* --- Top bar --- */
+  .topbar {
+    background: #16213e;
+    padding: 10px 24px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 2px solid #0f3460;
+    height: 50px;
+  }
+  .topbar h1 { font-size: 20px; font-weight: 600; color: #e94560; }
+  .topbar-right { display: flex; align-items: center; gap: 16px; }
+  .fps-badge {
+    background: #0f3460; padding: 5px 14px;
+    border-radius: 20px; font-size: 14px; font-weight: 600;
+  }
+  .fps-badge span { color: #00ff88; }
+  .btn {
+    background: #0f3460; color: #eee; border: none;
+    padding: 6px 14px; border-radius: 6px; cursor: pointer;
+    font-size: 13px; font-weight: 600;
+  }
+  .btn:hover { background: #1a4a8a; }
+
+  /* --- Main layout --- */
+  .main {
+    display: flex;
+    height: calc(100vh - 50px);
+  }
+
+  /* Left: video feed */
+  .feed-panel {
+    flex: 1;
+    display: flex; align-items: center; justify-content: center;
+    background: #0a0a1a;
+    padding: 12px;
+    min-width: 0;
+    position: relative;
+  }
+  .video-container {
+    position: relative;
+    max-width: 100%; max-height: 100%;
+  }
+  #webcam {
+    display: block;
+    max-width: 100%; max-height: calc(100vh - 74px);
+    border-radius: 8px; border: 2px solid #0f3460;
+  }
+  #overlay {
+    position: absolute; top: 0; left: 0;
+    border-radius: 8px;
+    pointer-events: none;
+  }
+  /* Hidden canvases for processing */
+  .hidden { display: none; }
+
+  /* --- Right sidebar --- */
+  .sidebar {
+    width: 340px; min-width: 340px;
+    background: #16213e;
+    display: flex; flex-direction: column;
+    border-left: 2px solid #0f3460;
+    overflow: hidden;
+  }
+  .sidebar-section {
+    padding: 16px;
+    border-bottom: 1px solid #0f3460;
+  }
+  .sidebar-section h2 {
+    font-size: 11px; text-transform: uppercase;
+    letter-spacing: 1.5px; color: #888; margin-bottom: 10px;
+  }
+
+  /* Current detection */
+  .current-label {
+    font-size: 26px; font-weight: 700; margin-bottom: 8px; line-height: 1.2;
+  }
+  .current-meta { font-size: 13px; color: #aaa; line-height: 1.6; }
+  .current-meta strong { color: #ddd; }
+  .no-detection { color: #555; font-style: italic; font-size: 16px; padding: 12px 0; }
+
+  /* Detection log */
+  .log-section { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+  .log-list {
+    flex: 1; overflow-y: auto; padding: 0 16px 8px 16px;
+  }
+  .log-list::-webkit-scrollbar { width: 6px; }
+  .log-list::-webkit-scrollbar-track { background: transparent; }
+  .log-list::-webkit-scrollbar-thumb { background: #0f3460; border-radius: 3px; }
+  .log-entry {
+    font-size: 13px; padding: 5px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    display: flex; justify-content: space-between;
+  }
+  .log-entry .time { color: #666; font-size: 12px; margin-right: 8px; white-space: nowrap; }
+  .log-entry .label { font-weight: 600; }
+  .log-entry .conf { color: #888; font-size: 12px; white-space: nowrap; }
+
+  /* Statistics */
+  .stats-section { background: #0f3460; padding: 14px 16px; }
+  .stats-section h2 {
+    font-size: 11px; text-transform: uppercase;
+    letter-spacing: 1.5px; color: #888; margin-bottom: 8px;
+  }
+  .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .stat-item {
+    background: rgba(255,255,255,0.05);
+    padding: 8px 10px; border-radius: 6px; font-size: 12px;
+  }
+  .stat-item .stat-value { font-size: 18px; font-weight: 700; color: #e94560; }
+  .stat-item .stat-label { color: #888; font-size: 11px; }
+  .shape-counts { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .shape-chip {
+    padding: 3px 10px; border-radius: 12px;
+    font-size: 12px; font-weight: 600;
+    background: rgba(255,255,255,0.08);
+  }
+
+  /* Camera error */
+  .cam-error {
+    text-align: center; padding: 40px;
+  }
+  .cam-error h2 { color: #e94560; margin-bottom: 12px; }
+  .cam-error p { color: #aaa; font-size: 14px; line-height: 1.6; }
+</style>
+</head>
+<body>
+
+<!-- Loading overlay -->
+<div id="loading-overlay">
+  <div class="spinner"></div>
+  <h1>Shape Vision</h1>
+  <div class="status" id="load-status-1">Loading OpenCV.js...</div>
+  <div class="status" id="load-status-2">Loading Tesseract.js...</div>
+  <div class="status" id="load-status-3">Starting webcam...</div>
+</div>
+
+<!-- Top bar -->
+<div class="topbar">
+  <h1>Shape Vision Dashboard</h1>
+  <div class="topbar-right">
+    <button class="btn" id="screenshot-btn" title="Save screenshot">Screenshot</button>
+    <div class="fps-badge">FPS: <span id="fps-value">0.0</span></div>
+  </div>
+</div>
+
+<!-- Main layout -->
+<div class="main">
+  <div class="feed-panel" id="feed-panel">
+    <div class="video-container" id="video-container">
+      <video id="webcam" autoplay playsinline muted></video>
+      <canvas id="overlay"></canvas>
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <div class="sidebar-section">
+      <h2>Current Detection</h2>
+      <div id="current-detection">
+        <div class="no-detection">Waiting for shapes...</div>
+      </div>
+    </div>
+
+    <div class="sidebar-section log-section">
+      <h2>Detection Log</h2>
+      <div id="log-list" class="log-list"></div>
+    </div>
+
+    <div class="stats-section">
+      <h2>Statistics</h2>
+      <div class="stats-grid">
+        <div class="stat-item">
+          <div class="stat-value" id="stat-total">0</div>
+          <div class="stat-label">Total Detections</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="stat-avg-conf">0%</div>
+          <div class="stat-label">Avg Confidence</div>
+        </div>
+      </div>
+      <div id="shape-counts" class="shape-counts"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Hidden processing canvases -->
+<canvas id="proc-canvas" class="hidden"></canvas>
+
+<!-- Load OpenCV.js from CDN -->
+<script async src="https://docs.opencv.org/4.9.0/opencv.js" id="opencv-script"></script>
+
+<!-- Load Tesseract.js from CDN -->
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+<script>
+// ============================================================
+// CONFIGURATION — mirrors config.py
+// ============================================================
+const SHAPE_CONFIG = {
+  Triangle:  { minVert: 3, maxVert: 3, color: '#00FFFF', bgr: [255,255,0] },
+  Square:    { minVert: 4, maxVert: 4, aspectRange: [0.85, 1.15], color: '#FFA500', bgr: [0,165,255] },
+  Rectangle: { minVert: 4, maxVert: 4, aspectRange: null, color: '#FF00FF', bgr: [255,0,255] },
+  Circle:    { circularityThreshold: 0.80, color: '#00FF00', bgr: [0,255,0] },
+  Pentagon:  { minVert: 5, maxVert: 5, color: '#FFFF00', bgr: [0,255,255] },
+};
+
+const MIN_CONTOUR_AREA = 1500;
+const APPROX_POLY_EPSILON = 0.03;
+const EDGE_MARGIN = 5;
+const CENTROID_SHIFT_THRESHOLD = 50;
+const DETECTION_COOLDOWN_MS = 2000;
+const OCR_CONFIDENCE_THRESHOLD = 20; // Tesseract uses 0-100
+const MAX_LOG_ENTRIES = 20;
+
+// ============================================================
+// STATE
+// ============================================================
+let cvReady = false;
+let tesseractWorker = null;
+let ocrBusy = false;
+
+const detectionLog = [];
+const shapeCounts = {};
+let totalDetections = 0;
+let confidenceSum = 0;
+const lastSeen = {}; // key -> { time, cx, cy }
+
+// OCR cache: shapeKey -> { cx, cy, char, conf }
+const ocrCache = {};
+
+// Current detection for sidebar
+let currentDetection = null;
+
+// FPS tracking
+let frameCount = 0;
+let fpsStart = performance.now();
+let currentFps = 0;
+
+// ============================================================
+// INIT
+// ============================================================
+const video = document.getElementById('webcam');
+const overlay = document.getElementById('overlay');
+const overlayCtx = overlay.getContext('2d');
+const procCanvas = document.getElementById('proc-canvas');
+const procCtx = procCanvas.getContext('2d', { willReadFrequently: true });
+
+// Wait for OpenCV
+document.getElementById('opencv-script').onload = function() {
+  // OpenCV.js sets a global cv object after its own init
+  if (typeof cv !== 'undefined' && cv.Mat) {
+    onCvReady();
+  } else {
+    // cv module uses onRuntimeInitialized
+    cv['onRuntimeInitialized'] = onCvReady;
+  }
+};
+
+function onCvReady() {
+  cvReady = true;
+  document.getElementById('load-status-1').textContent = 'OpenCV.js loaded.';
+  tryStart();
+}
+
+// Init Tesseract
+async function initTesseract() {
+  try {
+    tesseractWorker = await Tesseract.createWorker('eng', 1, {
+      logger: m => {
+        if (m.status === 'recognizing text') return;
+        document.getElementById('load-status-2').textContent =
+          'Tesseract: ' + m.status + (m.progress ? ' ' + Math.round(m.progress*100) + '%' : '');
+      }
+    });
+    await tesseractWorker.setParameters({
+      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789',
+      tessedit_pageseg_mode: '10', // single character
+    });
+    document.getElementById('load-status-2').textContent = 'Tesseract.js loaded.';
+    tryStart();
+  } catch (e) {
+    document.getElementById('load-status-2').textContent = 'Tesseract error: ' + e.message;
+  }
+}
+initTesseract();
+
+// Start webcam
+async function initCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'environment' }
+    });
+    video.srcObject = stream;
+    await video.play();
+    document.getElementById('load-status-3').textContent = 'Webcam started.';
+    tryStart();
+  } catch (e) {
+    document.getElementById('load-status-3').textContent = 'Camera error: ' + e.message;
+    document.getElementById('loading-overlay').style.display = 'none';
+    document.getElementById('feed-panel').innerHTML =
+      '<div class="cam-error"><h2>Camera Access Denied</h2>' +
+      '<p>Please allow camera access when prompted.<br>' +
+      'If you dismissed the prompt, click the camera icon in the address bar.</p></div>';
+  }
+}
+initCamera();
+
+let startChecks = { cv: false, tess: false, cam: false };
+function tryStart() {
+  if (cvReady) startChecks.cv = true;
+  if (tesseractWorker) startChecks.tess = true;
+  if (video.srcObject && video.readyState >= 2) startChecks.cam = true;
+
+  if (startChecks.cv && startChecks.tess && startChecks.cam) {
+    document.getElementById('loading-overlay').style.display = 'none';
+    resizeOverlay();
+    requestAnimationFrame(processFrame);
+  }
+}
+
+// Also check when video is ready
+video.addEventListener('loadeddata', tryStart);
+
+// ============================================================
+// RESIZE OVERLAY TO MATCH VIDEO
+// ============================================================
+function resizeOverlay() {
+  const rect = video.getBoundingClientRect();
+  overlay.width = rect.width;
+  overlay.height = rect.height;
+  overlay.style.width = rect.width + 'px';
+  overlay.style.height = rect.height + 'px';
+}
+window.addEventListener('resize', resizeOverlay);
+
+// ============================================================
+// SHAPE DETECTION (mirrors detector.py)
+// ============================================================
+function classifyShape(approx, contour) {
+  const numVert = approx.rows;
+  const area = cv.contourArea(contour);
+  const perimeter = cv.arcLength(contour, true);
+  const circularity = perimeter > 0 ? (4 * Math.PI * area) / (perimeter * perimeter) : 0;
+
+  // Check circle first
+  for (const [name, cfg] of Object.entries(SHAPE_CONFIG)) {
+    if (cfg.circularityThreshold !== undefined) {
+      if (circularity > cfg.circularityThreshold) {
+        return { name, color: cfg.color };
+      }
+    }
+  }
+
+  // Check vertex-based shapes
+  const candidates = [];
+  for (const [name, cfg] of Object.entries(SHAPE_CONFIG)) {
+    if (cfg.circularityThreshold !== undefined) continue;
+    if (numVert >= cfg.minVert && numVert <= cfg.maxVert) {
+      candidates.push({ name, cfg });
+    }
+  }
+
+  if (candidates.length === 0) return null;
+
+  if (candidates.length > 1) {
+    const rect = cv.boundingRect(approx);
+    const aspect = rect.height > 0 ? rect.width / rect.height : 0;
+    for (const c of candidates) {
+      if (c.cfg.aspectRange) {
+        if (aspect >= c.cfg.aspectRange[0] && aspect <= c.cfg.aspectRange[1]) {
+          return { name: c.name, color: c.cfg.color };
+        }
+      }
+    }
+    for (const c of candidates) {
+      if (!c.cfg.aspectRange) {
+        return { name: c.name, color: c.cfg.color };
+      }
+    }
+  }
+
+  return { name: candidates[0].name, color: candidates[0].cfg.color };
+}
+
+function detectShapes(src) {
+  const gray = new cv.Mat();
+  const blurred = new cv.Mat();
+  const thresh = new cv.Mat();
+  const contours = new cv.MatVector();
+  const hierarchy = new cv.Mat();
+
+  cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+  // CLAHE
+  const clahe = new cv.CLAHE(2.0, new cv.Size(8, 8));
+  const claheOut = new cv.Mat();
+  clahe.apply(gray, claheOut);
+  gray.delete();
+  clahe.delete();
+
+  cv.GaussianBlur(claheOut, blurred, new cv.Size(7, 7), 0);
+  cv.adaptiveThreshold(blurred, thresh, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 11, 3);
+  claheOut.delete();
+  blurred.delete();
+
+  cv.findContours(thresh, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+  thresh.delete();
+  hierarchy.delete();
+
+  const h = src.rows;
+  const w = src.cols;
+  const detections = [];
+
+  for (let i = 0; i < contours.size(); i++) {
+    const cnt = contours.get(i);
+    const area = cv.contourArea(cnt);
+    if (area < MIN_CONTOUR_AREA) { cnt.delete(); continue; }
+
+    const rect = cv.boundingRect(cnt);
+    if (rect.x <= EDGE_MARGIN || rect.y <= EDGE_MARGIN) { cnt.delete(); continue; }
+    if (rect.x + rect.width >= w - EDGE_MARGIN || rect.y + rect.height >= h - EDGE_MARGIN) { cnt.delete(); continue; }
+
+    const peri = cv.arcLength(cnt, true);
+    const approx = new cv.Mat();
+    cv.approxPolyDP(cnt, approx, APPROX_POLY_EPSILON * peri, true);
+
+    const result = classifyShape(approx, cnt);
+    if (!result) { approx.delete(); cnt.delete(); continue; }
+
+    const moments = cv.moments(cnt);
+    if (moments.m00 === 0) { approx.delete(); cnt.delete(); continue; }
+    const cx = Math.round(moments.m10 / moments.m00);
+    const cy = Math.round(moments.m01 / moments.m00);
+
+    detections.push({
+      shapeName: result.name,
+      color: result.color,
+      rect: rect,
+      centroid: { x: cx, y: cy },
+    });
+
+    approx.delete();
+    cnt.delete();
+  }
+
+  contours.delete();
+  return detections;
+}
+
+// ============================================================
+// OCR
+// ============================================================
+async function runOCR(det) {
+  if (ocrBusy) return null;
+  ocrBusy = true;
+
+  try {
+    const r = det.rect;
+    const pad = 10;
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    const x1 = Math.max(r.x - pad, 0);
+    const y1 = Math.max(r.y - pad, 0);
+    const x2 = Math.min(r.x + r.width + pad, vw);
+    const y2 = Math.min(r.y + r.height + pad, vh);
+
+    // Draw ROI to a temp canvas for Tesseract
+    const roiW = x2 - x1;
+    const roiH = y2 - y1;
+    if (roiW < 10 || roiH < 10) return { char: '???', conf: 0 };
+
+    const roiCanvas = document.createElement('canvas');
+    roiCanvas.width = roiW;
+    roiCanvas.height = roiH;
+    const roiCtx = roiCanvas.getContext('2d');
+    roiCtx.drawImage(video, x1, y1, roiW, roiH, 0, 0, roiW, roiH);
+
+    const result = await tesseractWorker.recognize(roiCanvas);
+    const text = result.data.text.trim().toUpperCase();
+    const conf = result.data.confidence;
+
+    if (!text || conf < OCR_CONFIDENCE_THRESHOLD) {
+      return { char: '???', conf: conf };
+    }
+    // First alphanumeric character only
+    const match = text.match(/[A-Z0-9]/);
+    return { char: match ? match[0] : '???', conf: conf };
+  } catch (e) {
+    return { char: '???', conf: 0 };
+  } finally {
+    ocrBusy = false;
+  }
+}
+
+// ============================================================
+// DEBOUNCE & LOGGING
+// ============================================================
+function centroidDist(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function tryLog(shapeName, char, conf, color, centroid) {
+  const now = Date.now();
+  const key = shapeName + '-' + char;
+  if (lastSeen[key]) {
+    const prev = lastSeen[key];
+    const dist = centroidDist(centroid, prev);
+    if (dist < CENTROID_SHIFT_THRESHOLD && (now - prev.time) < DETECTION_COOLDOWN_MS) {
+      return false;
+    }
+  }
+  lastSeen[key] = { x: centroid.x, y: centroid.y, time: now };
+
+  const timeStr = new Date().toLocaleTimeString('en-GB', { hour12: false });
+  detectionLog.push({ time: timeStr, shapeName, char, conf, color });
+  if (detectionLog.length > MAX_LOG_ENTRIES) detectionLog.shift();
+
+  totalDetections++;
+  shapeCounts[shapeName] = (shapeCounts[shapeName] || 0) + 1;
+  confidenceSum += conf;
+  return true;
+}
+
+// ============================================================
+// MAIN FRAME LOOP
+// ============================================================
+let src = null;
+
+function processFrame() {
+  if (!cvReady || !video.videoWidth) {
+    requestAnimationFrame(processFrame);
+    return;
+  }
+
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+
+  // Set proc canvas size
+  procCanvas.width = vw;
+  procCanvas.height = vh;
+  procCtx.drawImage(video, 0, 0, vw, vh);
+
+  // Read into OpenCV Mat
+  if (src) src.delete();
+  src = cv.imread(procCanvas);
+
+  const detections = detectShapes(src);
+
+  // Draw overlay
+  resizeOverlay();
+  overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+
+  const scaleX = overlay.width / vw;
+  const scaleY = overlay.height / vh;
+
+  for (const det of detections) {
+    const r = det.rect;
+    const sx = r.x * scaleX;
+    const sy = r.y * scaleY;
+    const sw = r.width * scaleX;
+    const sh = r.height * scaleY;
+
+    // Bounding box
+    overlayCtx.strokeStyle = det.color;
+    overlayCtx.lineWidth = 2;
+    overlayCtx.strokeRect(sx, sy, sw, sh);
+
+    // Check OCR cache
+    const cacheKey = det.shapeName;
+    let charText = '???';
+    let charConf = 0;
+    if (ocrCache[cacheKey]) {
+      const cached = ocrCache[cacheKey];
+      if (centroidDist(det.centroid, cached) < CENTROID_SHIFT_THRESHOLD) {
+        charText = cached.char;
+        charConf = cached.conf;
+      }
+    }
+
+    // Label
+    const label = det.shapeName + ' - ' + charText + ' (' + charConf.toFixed(0) + '%)';
+    overlayCtx.font = 'bold 14px Segoe UI, sans-serif';
+    const tm = overlayCtx.measureText(label);
+    const lx = sx;
+    const ly = Math.max(sy - 8, 18);
+    overlayCtx.fillStyle = 'rgba(0,0,0,0.7)';
+    overlayCtx.fillRect(lx - 2, ly - 15, tm.width + 8, 20);
+    overlayCtx.fillStyle = det.color;
+    overlayCtx.fillText(label, lx + 2, ly);
+
+    // Try OCR (async, non-blocking)
+    if (!ocrBusy) {
+      const detCopy = { ...det };
+      runOCR(detCopy).then(result => {
+        if (!result) return;
+        ocrCache[detCopy.shapeName] = {
+          x: detCopy.centroid.x, y: detCopy.centroid.y,
+          char: result.char, conf: result.conf
+        };
+        tryLog(detCopy.shapeName, result.char, result.conf, detCopy.color, detCopy.centroid);
+        currentDetection = {
+          shapeName: detCopy.shapeName,
+          character: result.char,
+          shapeConf: 95,
+          charConf: result.conf,
+          color: detCopy.color,
+          time: new Date().toLocaleTimeString('en-GB', { hour12: false }),
+        };
+        updateSidebar();
+      });
+    } else {
+      // Still log with cached OCR if available
+      if (charText !== '???') {
+        tryLog(det.shapeName, charText, charConf, det.color, det.centroid);
+        currentDetection = {
+          shapeName: det.shapeName,
+          character: charText,
+          shapeConf: 95,
+          charConf: charConf,
+          color: det.color,
+          time: new Date().toLocaleTimeString('en-GB', { hour12: false }),
+        };
+      }
+    }
+  }
+
+  // FPS
+  frameCount++;
+  const now = performance.now();
+  if (now - fpsStart >= 500) {
+    currentFps = frameCount / ((now - fpsStart) / 1000);
+    frameCount = 0;
+    fpsStart = now;
+    document.getElementById('fps-value').textContent = currentFps.toFixed(1);
+  }
+
+  requestAnimationFrame(processFrame);
+}
+
+// ============================================================
+// SIDEBAR UPDATE
+// ============================================================
+function updateSidebar() {
+  // Current detection
+  const cdEl = document.getElementById('current-detection');
+  if (currentDetection) {
+    const c = currentDetection;
+    cdEl.innerHTML =
+      '<div class="current-label" style="color:' + c.color + '">' +
+        c.shapeName + ' &mdash; ' + c.character +
+      '</div>' +
+      '<div class="current-meta">' +
+        'Shape conf: <strong>' + c.shapeConf.toFixed(1) + '%</strong><br>' +
+        'Char conf: <strong>' + c.charConf.toFixed(1) + '%</strong><br>' +
+        c.time +
+      '</div>';
+  }
+
+  // Log
+  const logEl = document.getElementById('log-list');
+  let logHtml = '';
+  for (let i = detectionLog.length - 1; i >= 0; i--) {
+    const e = detectionLog[i];
+    logHtml +=
+      '<div class="log-entry">' +
+        '<div><span class="time">[' + e.time + ']</span>' +
+        '<span class="label" style="color:' + e.color + '">' +
+          e.shapeName + ' &mdash; ' + e.char +
+        '</span></div>' +
+        '<div class="conf">' + e.conf.toFixed(0) + '%</div>' +
+      '</div>';
+  }
+  logEl.innerHTML = logHtml;
+
+  // Stats
+  document.getElementById('stat-total').textContent = totalDetections;
+  const avg = totalDetections > 0 ? confidenceSum / totalDetections : 0;
+  document.getElementById('stat-avg-conf').textContent = avg.toFixed(1) + '%';
+
+  const scEl = document.getElementById('shape-counts');
+  let scHtml = '';
+  for (const [shape, count] of Object.entries(shapeCounts)) {
+    scHtml += '<span class="shape-chip">' + shape + ': ' + count + '</span>';
+  }
+  scEl.innerHTML = scHtml;
+}
+
+// Periodic sidebar refresh
+setInterval(updateSidebar, 500);
+
+// ============================================================
+// SCREENSHOT
+// ============================================================
+document.getElementById('screenshot-btn').addEventListener('click', () => {
+  const c = document.createElement('canvas');
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  c.width = vw;
+  c.height = vh;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(video, 0, 0, vw, vh);
+  // Draw overlay on top
+  ctx.drawImage(overlay, 0, 0, vw, vh);
+
+  const link = document.createElement('a');
+  link.download = 'shape_vision_' + Date.now() + '.png';
+  link.href = c.toDataURL();
+  link.click();
+});
+</script>
+</body>
+</html>
