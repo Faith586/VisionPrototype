@@ -1,12 +1,13 @@
 """
-Webcam-based data collection tool for capturing real shape images.
+Webcam-based data collection tool for capturing real shape+tag images.
 
 Controls:
-    1-5   : Select class (1=Triangle, 2=Square, 3=Rectangle, 4=Circle, 5=Pentagon)
-    SPACE : Capture current frame and draw bounding box
-    s     : Save annotation for current capture
-    r     : Reset current capture (re-draw box)
-    q     : Quit
+    1-9, 0, a-f : Select class (see list below)
+    SPACE        : Capture current frame and draw bounding box
+    s            : Save annotation for current capture
+    r            : Reset current capture (re-draw box)
+    n / p        : Next / Previous class
+    q            : Quit
 
 After pressing SPACE, click and drag on the image to draw a bounding box,
 then press 's' to save.
@@ -63,7 +64,6 @@ def main():
     os.makedirs(img_dir, exist_ok=True)
     os.makedirs(lbl_dir, exist_ok=True)
 
-    # Count existing files to continue numbering
     existing = [f for f in os.listdir(img_dir) if f.startswith("real_")]
     start_idx = len(existing)
 
@@ -81,10 +81,13 @@ def main():
     current_class = 0
     captured_frame = None
     count = start_idx
-    mode = "live"  # "live" or "annotate"
+    mode = "live"
 
-    print("=== Shape Data Collection Tool ===")
-    print("Keys: 1-5 select class | SPACE capture | s save | r reset | q quit")
+    print("=== Shape+Tag Data Collection Tool ===")
+    print(f"Classes ({len(config.CLASSES)}):")
+    for i, cls in enumerate(config.CLASSES):
+        print(f"  {i:2d} = {cls}")
+    print("\nKeys: n/p cycle class | SPACE capture | s save | r reset | q quit")
     print(f"Current class: {config.CLASSES[current_class]}")
     print(f"Saving to: {args.split}/")
 
@@ -95,21 +98,22 @@ def main():
                 continue
 
             display = frame.copy()
-            # Show class and instructions
-            label = f"Class: {config.CLASSES[current_class]} | SPACE to capture | q to quit"
-            cv2.putText(display, label, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            label = f"[{current_class}] {config.CLASSES[current_class]} | SPACE capture | n/p cycle | q quit"
+            cv2.putText(display, label, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
             cv2.putText(display, f"Saved: {count - start_idx}", (10, 60),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
             cv2.imshow("Collect Data", display)
-        # else: we're in annotate mode, display is managed by mouse callback
 
         key = cv2.waitKey(1) & 0xFF
 
         if key == ord('q'):
             break
-        elif key in [ord('1'), ord('2'), ord('3'), ord('4'), ord('5')]:
-            current_class = key - ord('1')
-            print(f"Selected class: {config.CLASSES[current_class]}")
+        elif key == ord('n'):
+            current_class = (current_class + 1) % len(config.CLASSES)
+            print(f"Selected class: [{current_class}] {config.CLASSES[current_class]}")
+        elif key == ord('p'):
+            current_class = (current_class - 1) % len(config.CLASSES)
+            print(f"Selected class: [{current_class}] {config.CLASSES[current_class]}")
         elif key == ord(' ') and mode == "live":
             ret, captured_frame = cap.read()
             if ret:
@@ -123,7 +127,6 @@ def main():
         elif key == ord('s') and mode == "annotate" and box is not None:
             h, w = captured_frame.shape[:2]
             x1, y1, x2, y2 = box
-            # Convert to YOLO format
             x_center = ((x1 + x2) / 2) / w
             y_center = ((y1 + y2) / 2) / h
             bw = (x2 - x1) / w

@@ -1,8 +1,10 @@
 """
-Generate synthetic training data for YOLO shape detection.
+Generate synthetic training data for YOLO shape + character tag detection.
 
-Creates images with randomly placed/rotated paper-like shapes containing
-characters, along with YOLO-format annotation files.
+Creates images with randomly placed/rotated colored shape tags, each bearing
+a specific letter (X, Y, or Z).  The compound class encodes both the shape
+and the letter so YOLO learns to distinguish identical shapes that carry
+different letters/colors.
 
 Usage:
     python scripts/generate_data.py
@@ -27,18 +29,15 @@ def _random_bg(size):
     img = np.zeros((size, size, 3), dtype=np.uint8)
     choice = random.random()
     if choice < 0.35:
-        # solid color
         color = [random.randint(100, 240) for _ in range(3)]
         img[:] = color
     elif choice < 0.7:
-        # vertical gradient
         c1 = np.array([random.randint(80, 230) for _ in range(3)], dtype=np.float64)
         c2 = np.array([random.randint(80, 230) for _ in range(3)], dtype=np.float64)
         for y in range(size):
             t = y / size
             img[y, :] = (c1 * (1 - t) + c2 * t).astype(np.uint8)
     else:
-        # noisy
         base = random.randint(120, 220)
         img[:] = base
         noise = np.random.randint(-30, 30, img.shape, dtype=np.int16)
@@ -46,10 +45,12 @@ def _random_bg(size):
     return img
 
 
-def _random_paper_color():
-    """White-ish or pastel paper color."""
-    base = random.randint(200, 255)
-    return (base, base - random.randint(0, 20), base - random.randint(0, 30))
+def _tag_fill_color(letter):
+    """Return the fill color for a tag, with slight random variation for robustness."""
+    base = config.TAG_COLORS_BGR[letter]
+    return tuple(
+        max(0, min(255, c + random.randint(-25, 25))) for c in base
+    )
 
 
 def _draw_character(img, cx, cy, size, char):
@@ -69,14 +70,18 @@ def _draw_character(img, cx, cy, size, char):
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
     tx = cx - tw // 2
     ty = cy - th // 2
-    # dark text color
-    text_color = (random.randint(0, 60), random.randint(0, 60), random.randint(0, 60))
+
+    # White text on colored tag for high contrast
+    text_color = (255, 255, 255)
+    # Sometimes use dark text for variety
+    if random.random() < 0.3:
+        text_color = (random.randint(0, 40), random.randint(0, 40), random.randint(0, 40))
+
     draw.text((tx, ty), char, fill=text_color, font=font)
     return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
 
 def _make_triangle(cx, cy, size):
-    """Return triangle polygon points."""
     angle_offset = random.uniform(0, 2 * math.pi)
     r = size // 2
     pts = []
@@ -127,34 +132,35 @@ def _make_pentagon(cx, cy, size):
 
 
 SHAPE_GENERATORS = {
-    0: ("Triangle", _make_triangle),
-    1: ("Square", _make_square),
-    2: ("Rectangle", _make_rectangle),
-    3: ("Circle", None),
-    4: ("Pentagon", _make_pentagon),
+    "Triangle":  _make_triangle,
+    "Square":    _make_square,
+    "Rectangle": _make_rectangle,
+    "Circle":    None,
+    "Pentagon":  _make_pentagon,
 }
 
 
 def _draw_shape(img, class_id, cx, cy, size):
-    """Draw a shape and return its bounding box (x1, y1, x2, y2)."""
-    color = _random_paper_color()
-    border_color = tuple(max(0, c - random.randint(40, 80)) for c in color)
-    char = random.choice(config.SYNTH_CHARACTERS)
+    """Draw a colored shape tag with its assigned letter.  Returns bounding box."""
+    class_name = config.CLASSES[class_id]
+    shape_name, letter = class_name.rsplit("-", 1)
 
-    if class_id == 3:
-        # Circle
+    fill_color = _tag_fill_color(letter)
+    border_color = tuple(max(0, c - random.randint(30, 60)) for c in fill_color)
+
+    if shape_name == "Circle":
         r = size // 2
-        cv2.circle(img, (cx, cy), r, color, -1, cv2.LINE_AA)
+        cv2.circle(img, (cx, cy), r, fill_color, -1, cv2.LINE_AA)
         cv2.circle(img, (cx, cy), r, border_color, 2, cv2.LINE_AA)
-        img[:] = _draw_character(img, cx, cy, size, char)
+        img[:] = _draw_character(img, cx, cy, size, letter)
         x1, y1 = cx - r, cy - r
         x2, y2 = cx + r, cy + r
     else:
-        _, gen_fn = SHAPE_GENERATORS[class_id]
+        gen_fn = SHAPE_GENERATORS[shape_name]
         pts = gen_fn(cx, cy, size)
-        cv2.fillPoly(img, [pts], color, cv2.LINE_AA)
+        cv2.fillPoly(img, [pts], fill_color, cv2.LINE_AA)
         cv2.polylines(img, [pts], True, border_color, 2, cv2.LINE_AA)
-        img[:] = _draw_character(img, cx, cy, size, char)
+        img[:] = _draw_character(img, cx, cy, size, letter)
         x1 = pts[:, 0].min()
         y1 = pts[:, 1].min()
         x2 = pts[:, 0].max()
@@ -165,28 +171,22 @@ def _draw_shape(img, class_id, cx, cy, size):
 
 def _add_augmentation(img):
     """Apply random augmentations to make the model robust."""
-    # Random brightness
     if random.random() > 0.5:
         delta = random.randint(-40, 40)
         img = np.clip(img.astype(np.int16) + delta, 0, 255).astype(np.uint8)
-
-    # Random blur
     if random.random() > 0.6:
         k = random.choice([3, 5])
         img = cv2.GaussianBlur(img, (k, k), 0)
-
-    # Random noise
     if random.random() > 0.7:
         noise = np.random.normal(0, 8, img.shape).astype(np.int16)
         img = np.clip(img.astype(np.int16) + noise, 0, 255).astype(np.uint8)
-
     return img
 
 
 # ── main generation ──────────────────────────────────────────────────────────
 
 def generate_image(img_size):
-    """Generate a single training image with random shapes, return (img, labels)."""
+    """Generate a single training image with random shape tags, return (img, labels)."""
     img = _random_bg(img_size)
     num_shapes = random.randint(config.SYNTH_MIN_SHAPES, config.SYNTH_MAX_SHAPES)
     labels = []
@@ -203,7 +203,6 @@ def generate_image(img_size):
             cx = random.randint(margin, img_size - margin)
             cy = random.randint(margin, img_size - margin)
 
-            # Check overlap with existing shapes
             ok = True
             for bx1, by1, bx2, by2 in placed_boxes:
                 if not (cx - size // 2 > bx2 or cx + size // 2 < bx1 or
@@ -226,7 +225,6 @@ def generate_image(img_size):
         y2 = min(img_size, y2)
         placed_boxes.append((x1, y1, x2, y2))
 
-        # Convert to YOLO format: class x_center y_center width height (normalized)
         bw = x2 - x1
         bh = y2 - y1
         if bw < 5 or bh < 5:
@@ -274,6 +272,7 @@ def generate_dataset():
         f.write(f"names: {config.CLASSES}\n")
 
     print(f"\nDataset saved to {dataset_dir}")
+    print(f"  Classes ({len(config.CLASSES)}): {config.CLASSES}")
     print(f"YAML config: {yaml_path}")
     return yaml_path
 

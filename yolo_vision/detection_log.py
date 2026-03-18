@@ -2,21 +2,21 @@
 
 import math
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import config
 
 
 @dataclass
 class LogEntry:
     timestamp: float
-    shape_name: str
-    character: str
+    class_name: str      # e.g. "Triangle-X"
+    letter: str           # e.g. "X"
     confidence: float
     color: str
 
     @property
     def label(self):
-        return f"{self.shape_name} — {self.character}"
+        return self.class_name
 
     @property
     def time_str(self):
@@ -36,9 +36,9 @@ class DetectionLog:
     def average_confidence(self):
         return self.confidence_sum / self.total_count if self.total_count else 0.0
 
-    def try_log(self, shape_name, character, confidence, color, centroid):
+    def try_log(self, class_name, letter, confidence, color, centroid):
         now = time.time()
-        key = f"{shape_name}-{character}"
+        key = class_name
         if key in self._last_seen:
             prev = self._last_seen[key]
             dist = math.hypot(centroid[0] - prev["cx"], centroid[1] - prev["cy"])
@@ -47,12 +47,12 @@ class DetectionLog:
 
         self._last_seen[key] = {"cx": centroid[0], "cy": centroid[1], "time": now}
 
-        entry = LogEntry(now, shape_name, character, confidence, color)
+        entry = LogEntry(now, class_name, letter, confidence, color)
         self.entries.append(entry)
         if len(self.entries) > config.MAX_LOG_ENTRIES:
             self.entries.pop(0)
 
         self.total_count += 1
-        self.shape_counts[shape_name] = self.shape_counts.get(shape_name, 0) + 1
+        self.shape_counts[class_name] = self.shape_counts.get(class_name, 0) + 1
         self.confidence_sum += confidence
         return True

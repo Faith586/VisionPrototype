@@ -1,5 +1,8 @@
 """
-Real-time YOLO shape detection dashboard.
+Real-time YOLO shape + character tag detection dashboard.
+
+The model detects compound classes like "Triangle-X", "Square-Z", etc.
+No OCR needed — the letter/color is baked into the YOLO class itself.
 
 Usage:
     python main.py                      # uses best.pt from training
@@ -19,7 +22,6 @@ from ultralytics import YOLO
 
 import config
 from detection_log import DetectionLog
-from ocr_engine import OCREngine
 
 app = Flask(__name__)
 
@@ -36,7 +38,6 @@ _fps = 0.0
 def camera_loop(weights_path):
     global _latest_frame, _current_detection, _fps
 
-    # Load YOLO model
     if not os.path.exists(weights_path):
         print(f"ERROR: Weights not found at {weights_path}")
         print("Run these first:")
@@ -46,7 +47,6 @@ def camera_loop(weights_path):
 
     print(f"Loading YOLO model: {weights_path}")
     model = YOLO(weights_path)
-    ocr = OCREngine()
 
     cap = cv2.VideoCapture(config.CAMERA_INDEX)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAMERA_WIDTH)
@@ -60,14 +60,12 @@ def camera_loop(weights_path):
 
     frame_count = 0
     fps_start = time.time()
-    ocr_cache = {}  # class_name -> { cx, cy, char, conf }
 
     while True:
         ret, frame = cap.read()
         if not ret:
             continue
 
-        # Run YOLO inference
         results = model.predict(
             frame,
             conf=config.CONFIDENCE_THRESHOLD,
@@ -88,32 +86,19 @@ def camera_loop(weights_path):
                 if cls_id >= len(config.CLASSES):
                     continue
 
-                shape_name = config.CLASSES[cls_id]
-                bgr_color = config.CLASS_COLORS[shape_name]
-                css_color = config.CLASS_COLORS_CSS[shape_name]
+                class_name = config.CLASSES[cls_id]
+                shape_name, letter = class_name.rsplit("-", 1)
+                bgr_color = config.CLASS_COLORS[class_name]
+                css_color = config.CLASS_COLORS_CSS[class_name]
+                tag_css = config.TAG_COLORS_CSS[letter]
                 cx = (x1 + x2) // 2
                 cy = (y1 + y2) // 2
-
-                # OCR: use cache or run fresh
-                char, char_conf = "???", 0.0
-                cache_key = shape_name
-                if cache_key in ocr_cache:
-                    cached = ocr_cache[cache_key]
-                    dist = ((cx - cached["cx"])**2 + (cy - cached["cy"])**2) ** 0.5
-                    if dist < config.CENTROID_SHIFT_THRESHOLD:
-                        char, char_conf = cached["char"], cached["conf"]
-
-                if frame_count % config.OCR_FRAME_SKIP == 0 or char == "???":
-                    new_char, new_conf = ocr.recognize(frame, (x1, y1, x2, y2))
-                    if new_char != "???":
-                        char, char_conf = new_char, new_conf
-                        ocr_cache[cache_key] = {"cx": cx, "cy": cy, "char": char, "conf": char_conf}
 
                 # Draw bounding box
                 cv2.rectangle(annotated, (x1, y1), (x2, y2), bgr_color, 2)
 
                 # Label
-                label = f"{shape_name} - {char} ({conf*100:.0f}%)"
+                label = f"{shape_name}-{letter} ({conf*100:.0f}%)"
                 (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
                 cv2.rectangle(annotated, (x1, y1 - th - 10), (x1 + tw + 4, y1), bgr_color, -1)
                 cv2.putText(annotated, label, (x1 + 2, y1 - 5),
@@ -121,16 +106,17 @@ def camera_loop(weights_path):
 
                 detections.append({
                     "shape": shape_name,
-                    "char": char,
-                    "shape_conf": conf,
-                    "char_conf": char_conf,
+                    "letter": letter,
+                    "class": class_name,
+                    "conf": conf,
                     "color": css_color,
+                    "tag_color": tag_css,
                     "centroid": (cx, cy),
                 })
 
                 # Log
                 with _lock:
-                    _detection_log.try_log(shape_name, char, char_conf, css_color, (cx, cy))
+                    _detection_log.try_log(class_name, letter, conf, css_color, (cx, cy))
 
         # FPS
         frame_count += 1
@@ -140,11 +126,9 @@ def camera_loop(weights_path):
             frame_count = 0
             fps_start = time.time()
 
-        # Draw FPS
         cv2.putText(annotated, f"FPS: {_fps:.1f}", (10, 30),
                      cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
-        # Encode and store
         _, jpeg = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
 
         with _lock:
@@ -153,10 +137,11 @@ def camera_loop(weights_path):
                 d = detections[0]
                 _current_detection = {
                     "shape": d["shape"],
-                    "character": d["char"],
-                    "shape_conf": d["shape_conf"] * 100,
-                    "char_conf": d["char_conf"] * 100,
+                    "letter": d["letter"],
+                    "class": d["class"],
+                    "conf": d["conf"] * 100,
                     "color": d["color"],
+                    "tag_color": d["tag_color"],
                     "time": time.strftime("%H:%M:%S"),
                 }
 
@@ -171,7 +156,7 @@ def generate_mjpeg():
             time.sleep(0.01)
             continue
         yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n")
-        time.sleep(0.016)  # ~60 fps cap
+        time.sleep(0.016)
 
 
 @app.route("/")
@@ -212,7 +197,7 @@ def api_detections():
 # ── entry point ──────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="YOLO Shape Vision Dashboard")
+    parser = argparse.ArgumentParser(description="YOLO Shape+Tag Vision Dashboard")
     parser.add_argument("--weights", default=config.BEST_WEIGHTS, help="Path to YOLO weights (.pt)")
     parser.add_argument("--port", type=int, default=5000)
     args = parser.parse_args()
