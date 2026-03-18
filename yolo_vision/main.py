@@ -27,8 +27,8 @@ app = Flask(__name__)
 
 # ── shared state (protected by lock) ─────────────────────────────────────────
 _lock = threading.Lock()
-_latest_frame: bytes | None = None
-_current_detection: dict | None = None
+_latest_frame = None   # type: Optional[bytes]
+_current_detection = None  # type: Optional[dict]
 _detection_log = DetectionLog()
 _fps = 0.0
 
