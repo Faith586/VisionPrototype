@@ -45,16 +45,14 @@ def _random_bg(size):
     return img
 
 
-def _tag_fill_color(letter):
-    """Return the fill color for a tag, with slight random variation for robustness."""
-    base = config.TAG_COLORS_BGR[letter]
-    return tuple(
-        max(0, min(255, c + random.randint(-25, 25))) for c in base
-    )
+def _tag_fill_color():
+    """White-ish fill to mimic white 3D-printed filament under varied lighting."""
+    v = random.randint(210, 255)
+    return (v, v - random.randint(0, 10), v - random.randint(0, 10))
 
 
 def _draw_character(img, cx, cy, size, char):
-    """Draw a character at the center of a shape using PIL for proper font rendering."""
+    """Draw a dark character on a white shape (black filament letter on white tag)."""
     pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(pil_img)
     font_size = int(size * 0.5)
@@ -71,11 +69,9 @@ def _draw_character(img, cx, cy, size, char):
     tx = cx - tw // 2
     ty = cy - th // 2
 
-    # White text on colored tag for high contrast
-    text_color = (255, 255, 255)
-    # Sometimes use dark text for variety
-    if random.random() < 0.3:
-        text_color = (random.randint(0, 40), random.randint(0, 40), random.randint(0, 40))
+    # Dark text (black filament) with slight variation for robustness
+    v = random.randint(0, 50)
+    text_color = (v, v, v)
 
     draw.text((tx, ty), char, fill=text_color, font=font)
     return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
@@ -104,48 +100,19 @@ def _make_square(cx, cy, size):
     return np.array(pts, dtype=np.int32)
 
 
-def _make_rectangle(cx, cy, size):
-    w = size
-    h = int(size * random.uniform(0.45, 0.75))
-    if random.random() > 0.5:
-        w, h = h, w
-    angle = random.uniform(-0.3, 0.3)
-    hw, hh = w // 2, h // 2
-    pts = []
-    for dx, dy in [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)]:
-        rx = int(cx + dx * math.cos(angle) - dy * math.sin(angle))
-        ry = int(cy + dx * math.sin(angle) + dy * math.cos(angle))
-        pts.append([rx, ry])
-    return np.array(pts, dtype=np.int32)
-
-
-def _make_pentagon(cx, cy, size):
-    angle_offset = random.uniform(0, 2 * math.pi)
-    r = size // 2
-    pts = []
-    for i in range(5):
-        a = angle_offset + i * (2 * math.pi / 5)
-        px = int(cx + r * math.cos(a))
-        py = int(cy + r * math.sin(a))
-        pts.append([px, py])
-    return np.array(pts, dtype=np.int32)
-
-
 SHAPE_GENERATORS = {
     "Triangle":  _make_triangle,
     "Square":    _make_square,
-    "Rectangle": _make_rectangle,
     "Circle":    None,
-    "Pentagon":  _make_pentagon,
 }
 
 
 def _draw_shape(img, class_id, cx, cy, size):
-    """Draw a colored shape tag with its assigned letter.  Returns bounding box."""
+    """Draw a white shape tag with a dark letter.  Returns bounding box."""
     class_name = config.CLASSES[class_id]
     shape_name, letter = class_name.rsplit("-", 1)
 
-    fill_color = _tag_fill_color(letter)
+    fill_color = _tag_fill_color()
     border_color = tuple(max(0, c - random.randint(30, 60)) for c in fill_color)
 
     if shape_name == "Circle":

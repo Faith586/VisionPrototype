@@ -3,28 +3,16 @@
 import os
 
 # ---------------------------------------------------------------------------
-# Tag characters and their associated tag colors (BGR for OpenCV)
-# Each 3D-printed tag has a shape, a color, and a letter.
-# The model learns to distinguish identical shapes by letter AND color.
+# Tag characters and their appearance
+# 3D-printed black & white tags: white shape with black letter on it.
+# The model distinguishes identical shapes purely by the letter printed on them.
 # ---------------------------------------------------------------------------
 TAG_LETTERS = ["X", "Y", "Z"]
 
-TAG_COLORS_BGR = {
-    "X": (60, 60, 220),    # red tag
-    "Y": (60, 180, 60),    # green tag
-    "Z": (220, 140, 50),   # blue tag
-}
-
-TAG_COLORS_CSS = {
-    "X": "#DC3C3C",
-    "Y": "#3CB43C",
-    "Z": "#328CDC",
-}
-
 # ---------------------------------------------------------------------------
-# Base shapes
+# Base shapes (only the ones we're printing)
 # ---------------------------------------------------------------------------
-SHAPES = ["Triangle", "Square", "Rectangle", "Circle", "Pentagon"]
+SHAPES = ["Triangle", "Square", "Circle"]
 
 # ---------------------------------------------------------------------------
 # Compound classes — order matters (index = class id in YOLO labels)
@@ -34,23 +22,28 @@ CLASSES = []
 for _shape in SHAPES:
     for _letter in TAG_LETTERS:
         CLASSES.append(f"{_shape}-{_letter}")
-# Result: ["Triangle-X", "Triangle-Y", "Triangle-Z", "Square-X", ..., "Pentagon-Z"]
+# Result: ["Triangle-X", "Triangle-Y", "Triangle-Z",
+#          "Square-X",   "Square-Y",   "Square-Z",
+#          "Circle-X",   "Circle-Y",   "Circle-Z"]
 
-# Colors for bounding boxes — based on shape, tinted by letter
+# Colors for bounding boxes on the dashboard (just for visual distinction)
 _SHAPE_BASE_BGR = {
     "Triangle":  (255, 255, 0),    # cyan
     "Square":    (0, 165, 255),    # orange
-    "Rectangle": (255, 0, 255),    # magenta
     "Circle":    (0, 255, 0),      # green
-    "Pentagon":  (0, 255, 255),    # yellow
 }
 
 _SHAPE_BASE_CSS = {
     "Triangle":  "#00FFFF",
     "Square":    "#FFA500",
-    "Rectangle": "#FF00FF",
     "Circle":    "#00FF00",
-    "Pentagon":  "#FFFF00",
+}
+
+# Per-letter accent colors for dashboard badges
+TAG_COLORS_CSS = {
+    "X": "#FF6B6B",
+    "Y": "#51CF66",
+    "Z": "#339AF0",
 }
 
 CLASS_COLORS = {}
@@ -64,8 +57,8 @@ for _cls in CLASSES:
 # Synthetic data generation
 # ---------------------------------------------------------------------------
 SYNTH_IMG_SIZE = 640
-SYNTH_TRAIN_COUNT = 3000           # more images for 15 classes
-SYNTH_VAL_COUNT = 600
+SYNTH_TRAIN_COUNT = 2000           # 9 classes, plenty of data
+SYNTH_VAL_COUNT = 400
 SYNTH_MIN_SHAPES = 1
 SYNTH_MAX_SHAPES = 4
 SYNTH_MIN_SIZE = 60
@@ -75,7 +68,7 @@ SYNTH_MAX_SIZE = 200
 # Training
 # ---------------------------------------------------------------------------
 YOLO_MODEL_BASE = "yolov8n.pt"         # nano model for fast training
-TRAIN_EPOCHS = 100                      # more epochs for 15 classes
+TRAIN_EPOCHS = 80
 TRAIN_BATCH = 16
 TRAIN_IMG_SIZE = 640
 
